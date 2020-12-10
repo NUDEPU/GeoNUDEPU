@@ -1,0 +1,368 @@
+---
+title: "Cessão Aquática"
+subtitle: |
+  Itapoá Terminais Portuários S/A   
+  Baía da Babitonga  
+  04972.004921/2016-81
+author: "Luiz Fernando Palin Droubi"
+date: \today
+output: 
+  binb::metropolis:
+    df_print: tibble
+classoption: "aspectratio=169"
+fontsize: 9pt
+header-includes:
+ \usepackage[brazil]{babel}
+ \usepackage{booktabs}
+ \usepackage{longtable}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = TRUE, echo = FALSE, warning = FALSE, 
+                      message = FALSE, fig.align = "center", out.width = "75%")
+knitr::knit_hooks$set(mysize = function(before, options, envir) {
+  if (before) 
+    return(options$size)
+})
+library(sf)
+library(leaflet)
+library(leafem)
+library(lwgeom)
+library(raster)
+library(knitr)
+library(kableExtra)
+library(appraiseR)
+library(units)
+install_symbolic_unit(name = "Reais", warn = TRUE, dimensionless = TRUE)
+library(geosphere)
+library(textreadr)
+library(stringr)
+library(GeoNUDEPU)
+```
+
+```{r, results='hide'}
+# 1. Digitação da Geometria
+#  
+# Digitar Coordenadas dos vértices
+#
+# 1.1 Memorial descritivo:
+#
+memorial <- read_docx("./memorial.docx")
+#
+# Píer
+#
+pier <- memorial[6]
+# Para visualizar quais caracteres esta expressao encontra, use:
+#str_view_all(pier, "V\\d{2}")
+vertices <- unique(str_extract_all(pier, "V\\d{2}")[[1]])
+#str_view_all(pier, "E=\\d{3}[.]\\d{3}[,]\\d{4}")
+E <- str_extract_all(pier, "E=\\d{3}[.]\\d{3}[,]\\d{4}")
+N <- str_extract_all(pier, "N=\\d[.]\\d{3}[.]\\d{3}[,]\\d{4}")
+E <- str_replace_all(E[[1]], "[.]", "")
+N <- str_replace_all(N[[1]], "[.]", "")
+E <- as.numeric(sub(",", ".", sapply(E, str_replace, "E=", "")))
+N <- as.numeric(sub(",", ".", sapply(N, str_replace, "N=", "")))
+coords_pier <- cbind(E, N)
+rownames(coords_pier) <- vertices
+#
+# Área aquática entre as pontes de acesso:
+# 
+area_aquatica <- memorial[10]
+vertices <- unique(str_extract_all(area_aquatica, "V\\d{2}")[[1]])
+E <- str_extract_all(area_aquatica, "E=\\d{3}[.]\\d{3}[,]\\d{4}")
+N <- str_extract_all(area_aquatica, "N=\\d[.]\\d{3}[.]\\d{3}[,]\\d{4}")
+E <- str_replace_all(E[[1]], "[.]", "")
+N <- str_replace_all(N[[1]], "[.]", "")
+E <- as.numeric(sub(",", ".", sapply(E, str_replace, "E=", "")))
+N <- as.numeric(sub(",", ".", sapply(N, str_replace, "N=", "")))
+coords_area_aquatica <- cbind(E, N)
+rownames(coords_area_aquatica) <- vertices
+#
+# Berco de atracacao:
+#
+berco <- memorial[14]
+vertices <- unique(str_extract_all(berco, "V\\d{2}")[[1]])
+E <- str_extract_all(berco, "E=\\d{3}[.]\\d{3}[,]\\d{4}")
+N <- str_extract_all(berco, "N=\\d[.]\\d{3}[.]\\d{3}[,]\\d{4}")
+E <- str_replace_all(E[[1]], "[.]", "")
+N <- str_replace_all(N[[1]], "[.]", "")
+E <- as.numeric(sub(",", ".", sapply(E, str_replace, "E=", "")))
+N <- as.numeric(sub(",", ".", sapply(N, str_replace, "N=", "")))
+coords_berco <- cbind(E, N)
+rownames(coords_berco) <- vertices
+#
+# Área da ponte de serviço:
+#
+ponte <- memorial[22]
+vertices <- unique(str_extract_all(ponte, "P\\d{2}")[[1]])
+E <- str_extract_all(ponte, "E=\\d{3}[.]\\d{3}[,]\\d{4}")
+N <- str_extract_all(ponte, "N=\\d[.]\\d{3}[.]\\d{3}[,]\\d{4}")
+E <- str_replace_all(E[[1]], "[.]", "")
+N <- str_replace_all(N[[1]], "[.]", "")
+E <- as.numeric(sub(",", ".", sapply(E, str_replace, "E=", "")))
+N <- as.numeric(sub(",", ".", sapply(N, str_replace, "N=", "")))
+coords_ponte <- cbind(E, N)
+rownames(coords_ponte) <- vertices
+#
+coords_pier <- rbind(coords_pier, coords_pier[1,])
+coords_area_aquatica <- rbind(coords_area_aquatica, coords_area_aquatica[1,])
+coords_berco <- rbind(coords_berco, coords_berco[1,])
+coords_ponte <- rbind(coords_ponte, coords_ponte[1,])
+#
+#
+# 2. Criação dos polígonos
+#
+pier <- st_sf(geom = st_sfc(st_polygon(list(coords_pier))), crs = 31982)
+area_aquatica <- st_sf(geom = st_sfc(st_polygon(list(coords_area_aquatica))),
+                       crs = 31982)
+berco <- st_sf(geom = st_sfc(st_polygon(list(coords_berco))), crs = 31982)
+ponte <- st_sf(geom = st_sfc(st_polygon(list(coords_ponte))), crs = 31982)
+bacia <- st_sf(geom = st_sfc(st_point(x = c(739732.7281, 7101211.2468))), 
+               crs = 31982)
+bacia <- st_buffer(bacia, 375)
+#
+# 3. Criação da feição  
+#
+#
+mpl <- st_combine(rbind(pier, area_aquatica, berco, ponte))
+#
+# 4. Criação dos atributos  
+#
+attr <- data.frame(
+  destinacao = "cessao",
+  tipo = "aquatica",
+  rip = NA,
+  interessado = "Itapoá Terminais Portuários S/A",
+  area = st_area(mpl),
+  area_uniao = st_area(mpl),
+  inicio = NA,
+  prazo = NA,
+  vigencia = NA,
+  cnpj = "01.317.277/0001-05",
+  nup = "04972.004921/2016-81",
+  protocolo = "2348057",
+  ref = 5407304,
+  concedida = TRUE,
+  municipio = 9985,
+  logradouro = "08",
+  trecho = "00",
+  aval = set_units(217.62, Reais/m^2)*st_area(mpl),
+  dataaval = as.Date("2020-05-27"),
+  refaval = NA,
+  onerosa = TRUE,
+  geometriaAproximada = FALSE)
+#
+# 5. União dos atributos à geometria
+#
+# Atentar para a definição do crs apropriado
+# 
+#
+# Exemplos:
+# WGS 84 = 4326
+# SAD 69 22S = 29192
+# SIRGAS 2000 22S = 31982
+#
+spl_df <- st_sf(attr,
+                geometry = mpl, 
+                crs = 31982) %>%
+  st_transform(crs = 4326) # Transforma para WGS84.
+```
+
+```{r, results='hide'}
+# Leitura de dados da SPU-SC-NUDEM
+#
+data("polUniao")
+data("lpmHomologada")
+data("lpmDermarcada")
+data("lpmPresumida")
+data("lltmHomologada")
+data("lltmDemarcada")
+data("lltmPresumida")
+#
+# Leitura de dados das camadas existentes
+#
+ocupacoes <- st_read("https://raw.githubusercontent.com/geoSPU/SPU-SC-NUPRIV/master/ocupacoes.geojson")
+autobras <- st_read("https://github.com/geoSPU/SPUData/raw/master/autobras.geojson")
+cessoes <- st_read("https://raw.githubusercontent.com/geoSPU/SPUData/master/cessoes.geojson")
+entregas <- st_read("https://raw.githubusercontent.com/geoSPU/SPUData/master/entregas.geojson")
+certdisp <- st_read("https://github.com/geoSPU/SPUData/raw/master/certdisp.geojson")
+ranchos <- st_read("https://raw.githubusercontent.com/geoSPU/SPUData/master/ranchos_de_pesca.geojson")
+aeroportos <- st_read("https://github.com/geoSPU/SPUData/raw/master/aeroportos.geojson")
+portos <- st_read("https://github.com/Cadastro-Marinho/BrasilData/raw/master/portos.geojson")
+```
+
+## Poligonal cedida
+
+```{r mapa-imovel}
+ext <- extent(spl_df)
+m <- spl_df %>% 
+  leaflet() %>% 
+  # Adiciona ortofotos do Estado de SC (SIG-SC) como base
+  addWMSTiles(baseUrl = "http://sigsc.sc.gov.br/sigserver/SIGSC/wms", 
+              layers = list("OrtoRGB-Landsat-2012")) %>%
+  # Adiciona como camada de base Fotos de satélite da ESRI
+  # addProviderTiles(providers$Esri.WorldImagery) %>%
+  # Adiciona o(s) polígono(s) em análise
+  addPolygons(stroke = TRUE, weight = 2, color = "blue", 
+              group = "Área cedida") %>%
+  # Adiciona outras camadas existentes
+  addPolygons(data = portos, color = "yellow", group = "Porto") %>% 
+  # addPolygons(data = cessoes, color = "red") %>% 
+  # addPolygons(data = certdisp, color = "white", fillColor = "blue", 
+  #             dashArray = "10 10") %>% 
+  # addPolygons(data = autobras, color = "white", fillColor = "grey", 
+  #             dashArray = "10 10") %>% 
+  # addPolygons(data = entregas, color = "white", fillColor = "white", 
+  #             dashArray = "10 10") %>% 
+  # Adiciona polígonos da União
+  addPolygons(data = polUniao, color = "orange", group = "Terras de Marinha") %>% 
+  # Adiciona Linhas de Marinha
+  # addPolylines(data = lltmHomologada, color = "red") %>% 
+  # addPolylines(data = lpmHomologada, color = "blue") %>% 
+  # addPolylines(data = lltmDemarcada, color = "red", dashArray = "10 10") %>%
+  # addPolylines(data = lpmDemarcada, color = "blue", dashArray = "10 10") %>%
+  addPolylines(data = lltmPresumida, color = "red", dashArray = "10 10",
+               opacity = .2, weight = 3) %>%
+  addPolylines(data = lpmPresumida, color = "blue", dashArray = "10 10",
+               opacity = .2, weight = 3) %>%
+  # Zoom no imóvel em análise
+  fitBounds(lng1 = ext[1], lat1 = ext[3], lng2 = ext[2], lat2 = ext[4]) %>% 
+  # Adiciona Legendas
+  addLegend(labels = "Terras de Marinha", colors = "orange", 
+            group = "Terras de Marinha", position = "topright") %>% 
+  addLegend(labels = "Área cedida", colors = "blue", 
+            group = "Área cedida", position = "topright") %>% 
+  addLegend(labels = "Porto", colors = "yellow", 
+            group = "`Porto", position = "topright") %>% 
+  # Adiciona Minimapa
+  addMiniMap(position = "topleft", 
+             tiles = providers$Esri.WorldGrayCanvas) %>% 
+  addMouseCoordinates() %>%
+  addLogo("SPU.jpg", src = "local", position = "bottomleft", 
+                  offset.x = 15, offset.y = 15, 
+                  width = 75, height = 75)
+name <- paste(st_geohash(spl_df, 10), ".png", sep = "")
+mapview::mapshot(m, file = name, remove_url = FALSE)
+knitr::include_graphics(name)
+```
+
+## Poligonal em análise
+
+```{r}
+coords_ampliacao_berco <- matrix(c(739288.0927, 7101533.3411, #V13
+                                  739311.3126, 7101463.3513, #retirado do mapa
+                                  738821.7378, 7101294.0556, #V19
+                                  738798.7756, 7101360.7110, #V13A
+                                  739288.0927, 7101533.3411),#V13
+                                ncol = 2, byrow = TRUE)
+coords_ampliacao_cais <- matrix(c(739288.0927, 7101533.3411, #V13
+                                  739269.5942, 7101588.5049, #V15
+                                  738778.5759, 7101419.3472, #V14A
+                                  738798.7756, 7101360.7110, #V13A
+                                  739288.0927, 7101533.3411),#V13
+                                 ncol = 2, byrow = TRUE)
+ampliacao_cais <- st_sf(geom = st_sfc(st_polygon(list(coords_ampliacao_cais))),
+                        crs = 31982)
+ampliacao_berco <- st_sf(geom = st_sfc(st_polygon(list(coords_ampliacao_berco))),
+                        crs = 31982)
+#
+#
+mpl <- st_combine(rbind(ampliacao_berco, ampliacao_cais))
+#
+# 4. Criação dos atributos  
+#
+attr <- data.frame(
+  destinacao = "cessao",
+  tipo = "aquatica",
+  rip = NA,
+  interessado = "Itapoá Terminais Portuários S/A",
+  area = st_area(mpl),
+  area_uniao = st_area(mpl),
+  inicio = NA,
+  prazo = NA,
+  vigencia = NA,
+  cnpj = "01.317.277/0001-05",
+  nup = "04972.004921/2016-81",
+  protocolo = "SC01812/2019",
+  ref = 2751591,
+  concedida = TRUE,
+  municipio = 9985,
+  logradouro = "08",
+  trecho = "00",
+  aval = set_units(217.62, Reais/m^2)*st_area(mpl),
+  dataaval = as.Date("2020-05-27"),
+  refaval = NA,
+  onerosa = TRUE,
+  geometriaAproximada = FALSE)
+ampliacao_df <- st_sf(attr,
+                geometry = mpl, 
+                crs = 31982) %>%
+  st_transform(crs = 4326) # Transforma para WGS84.
+```
+
+```{r}
+ext <- extent(rbind(spl_df, ampliacao_df))
+m <- ampliacao_df %>%
+  leaflet() %>% 
+  # Adiciona ortofotos do Estado de SC (SIG-SC) como base
+  addWMSTiles(baseUrl = "http://sigsc.sc.gov.br/sigserver/SIGSC/wms", 
+              layers = list("OrtoRGB-Landsat-2012")) %>%
+  # Adiciona como camada de base Fotos de satélite da ESRI
+  # addProviderTiles(providers$Esri.WorldImagery) %>%
+  # Adiciona o(s) polígono(s) em análise
+  addPolygons(stroke = TRUE, weight = 2, fillColor = "red", color = "white",
+              group = "Área em análise", dashArray = "10 10") %>%
+  addPolygons(data = spl_df, color = "blue", group = "Área cedida") %>% 
+  # Adiciona outras camadas existentes
+  addPolygons(data = portos, color = "yellow", group = "Porto") %>% 
+  # addPolygons(data = cessoes, color = "red") %>% 
+  # addPolygons(data = certdisp, color = "white", fillColor = "blue", 
+  #             dashArray = "10 10") %>% 
+  # addPolygons(data = autobras, color = "white", fillColor = "grey", 
+  #             dashArray = "10 10") %>% 
+  # addPolygons(data = entregas, color = "white", fillColor = "white", 
+  #             dashArray = "10 10") %>% 
+  # Adiciona polígonos da União
+  addPolygons(data = polUniao, color = "orange", group = "Terras de Marinha") %>% 
+  # Adiciona Linhas de Marinha
+  # addPolylines(data = lltmHomologada, color = "red") %>% 
+  # addPolylines(data = lpmHomologada, color = "blue") %>% 
+  # addPolylines(data = lltmDemarcada, color = "red", dashArray = "10 10") %>%
+  # addPolylines(data = lpmDemarcada, color = "blue", dashArray = "10 10") %>%
+  addPolylines(data = lltmPresumida, color = "red", dashArray = "10 10",
+               opacity = .2, weight = 3) %>%
+  addPolylines(data = lpmPresumida, color = "blue", dashArray = "10 10",
+               opacity = .2, weight = 3) %>%
+  # Zoom no imóvel em análise
+  fitBounds(lng1 = ext[1], lat1 = ext[3], lng2 = ext[2], lat2 = ext[4]) %>% 
+  # Adiciona Legendas
+  addLegend(labels = "Terras de Marinha", colors = "orange", 
+            group = "Terras de Marinha", position = "topright") %>% 
+  addLegend(labels = "Área em análise", colors = "red", 
+            group = "Área em análise", position = "topright") %>% 
+  addLegend(labels = "Área cedida", colors = "blue", 
+            group = "Área cedida", position = "topright") %>% 
+  addLegend(labels = "Porto", colors = "yellow", 
+            group = "`Porto", position = "topright") %>% 
+  # Adiciona Minimapa
+  addMiniMap(position = "topleft", 
+             tiles = providers$Esri.WorldGrayCanvas) %>% 
+  addMouseCoordinates() %>%
+  addLogo("SPU.jpg", src = "local", position = "bottomleft", 
+                  offset.x = 15, offset.y = 15, 
+                  width = 75, height = 75)
+name <- paste(st_geohash(spl_df, 10), "_ampliacao.png", sep = "")
+mapview::mapshot(m, file = name, remove_url = FALSE)
+knitr::include_graphics(name)
+```
+
+## Exportar
+
+```{r, echo = TRUE, results='hide',  mysize=TRUE, size='\\scriptsize'}
+# Escrever no disco em formato geojson
+st_write(spl_df, "04972.004921.2016-81.geojson", delete_dsn = TRUE)
+# Escrever em kml
+#st_write(spl_df, "TUPItapoa.kml", delete_dsn = TRUE)
+```
+
+
