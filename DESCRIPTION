@@ -20,7 +20,10 @@ Imports:
     knitr,
     kableExtra,
     raster,
-    mapview
+    mapview,
+    appraiseR (>= 0.1.0)
 Suggests: 
     tinytex,
     webshot
+Remotes:  
+    lfpdroubi/appraiseR
