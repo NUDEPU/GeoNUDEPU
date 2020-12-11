@@ -1,0 +1,342 @@
+---
+title: "Cessão Terrestre"
+subtitle: |
+  Prefeitura Municipal de Laguna  
+  04972.003143/2012-89  
+author: "Luiz Fernando Palin Droubi"
+date: \today
+output: 
+  binb::metropolis:
+    df_print: tibble
+classoption: "aspectratio=169"
+fontsize: 9pt
+header-includes:
+ \usepackage[brazil]{babel}
+ \usepackage{booktabs}
+ \usepackage{longtable}
+params:
+  data: coordenadas.xlsx
+  crs: 31982
+  destinacao: 
+    label: "Destinação:"
+    value: cessao
+    input: select
+    choices: [cessao, autobras, certdisp, ocupacao, entrega, doacao]
+  tipo: 
+    label: "Tipo:"
+    value: terrestre
+    input: select
+    choices: [aquatica, terrestre, mista]
+  rip: NA
+  interessado:  laros Heinrich Júnior
+  inicio: !r as.Date('2020-08-20')
+  prazo: 20
+  cnpj: 82.928.706/0001-82
+  nup: 04972.003143/2012-89
+  protocolo: 7150897
+  ref: 8864526
+  municipio: NA
+  logradouro: NA
+  trecho: NA
+  aval: 0 # reais por metro quadrado
+  dataaval: NA
+  refaval: NA
+  concedida: TRUE
+  onerosa: TRUE
+  geometriaAproximada: FALSE
+  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE, echo = FALSE, warning = FALSE, 
+                      message = FALSE, fig.align = "center", out.width = "75%")
+knitr::knit_hooks$set(mysize = function(before, options, envir) {
+  if (before) 
+    return(options$size)
+})
+library(readxl)
+library(sf)
+library(leaflet)
+library(leafem)
+library(lwgeom)
+library(raster)
+library(knitr)
+library(kableExtra)
+library(appraiseR)
+library(units)
+install_symbolic_unit(name = "Reais", warn = TRUE, dimensionless = TRUE)
+library(geosphere)
+library(GeoNUDEPU)
+```
+
+```{r, results='hide'}
+# 1. Digitação das Coordenadas
+#
+coords <- read_excel(params$data)
+#
+#
+# 2. Criação da feição  
+#
+# Atentar para a definição do crs apropriado
+# 
+#
+# Exemplos:
+# WGS 84 = 4326
+# SAD 69 22S = 29192
+# SIRGAS 2000 22S = 31982
+#
+#pl1 <- st_sf(geom = st_sfc(st_polygon(list(area1))))
+#pl2 <- st_sf(geom = st_sfc(st_polygon(list(area2))))
+#spl <- st_sfc(geom = st_combine(rbind(pl1, pl2)), crs = 29192)
+spl <- st_sfc(st_polygon(list(as.matrix(coords[, c("E", "N")]))), crs = params$crs)
+#
+# 3. Criação dos atributos  
+#
+vigencia <- as.POSIXlt(params$inicio)
+vigencia$year <- vigencia$year + params$prazo
+attr <- data.frame(
+  destinacao = params$destinacao,
+  tipo = params$tipo,
+  rip = params$rip,
+  interessado = params$interessado,
+  area = st_area(spl),
+  area_uniao = st_area(spl),
+  inicio = params$inicio,
+  prazo = params$prazo,
+  vigencia = vigencia ,
+  cnpj = params$cnpj,
+  nup = params$nup,
+  protocolo = params$protocolo,
+  ref = params$ref,
+  concedida = params$concedida,
+  municipio = params$municipio,
+  logradouro = params$logradouro,
+  trecho = params$trecho,
+  aval = set_units(params$aval, Reais/m^2)*st_area(spl),
+  dataaval = params$dataaval,
+  refaval = params$refaval,
+  onerosa = params$onerosa,
+  geometriaAproximada = params$geometriaAproximada)
+#
+# 4. União dos atributos à geometria
+#
+#
+spl_df <- st_sf(attr,
+                geometry = spl) %>%
+  st_transform(crs = 4326) # Transforma para WGS84.
+```
+
+```{r, results='hide'}
+# Leitura de dados da SPU-SC-NUDEM
+#
+data("polUniao")
+data("lpmHomologada")
+data("lpmDermarcada")
+data("lpmPresumida")
+data("lltmHomologada")
+data("lltmDemarcada")
+data("lltmPresumida")
+#
+# Leitura de dados das camadas existentes
+#
+ocupacoes <- st_read("https://raw.githubusercontent.com/geoSPU/SPU-SC-NUPRIV/master/ocupacoes.geojson")
+autobras <- st_read("https://github.com/geoSPU/SPUData/raw/master/autobras.geojson")
+cessoes <- st_read("https://raw.githubusercontent.com/geoSPU/SPUData/master/cessoes.geojson")
+entregas <- st_read("https://raw.githubusercontent.com/geoSPU/SPUData/master/entregas.geojson")
+certdisp <- st_read("https://github.com/geoSPU/SPUData/raw/master/certdisp.geojson")
+ranchos <- st_read("https://raw.githubusercontent.com/geoSPU/SPUData/master/ranchos_de_pesca.geojson")
+aeroportos <- st_read("https://github.com/geoSPU/SPUData/raw/master/aeroportos.geojson")
+portos <- st_read("https://github.com/Cadastro-Marinho/BrasilData/raw/master/portos.geojson")
+```
+
+
+
+## Poligonal em análise -- Ortofotos
+
+```{r mapa-imovel}
+ext <- extent(spl_df)
+m <- spl_df %>% 
+  leaflet() %>% 
+  # Adiciona ortofotos do Estado de SC (SIG-SC) como base
+  addWMSTiles(baseUrl = "http://sigsc.sc.gov.br/sigserver/SIGSC/wms", 
+              layers = list("OrtoRGB-Landsat-2012")) %>%
+  # Adiciona como camada de base Fotos de satélite da ESRI
+  # addProviderTiles(providers$Esri.WorldImagery) %>%
+  # Adiciona o(s) polígono(s) em análise
+  addPolygons(stroke = TRUE, weight = 2, color = "blue", 
+              group = "Em análise") %>%
+  # Adiciona outras camadas existentes
+  # addPolygons(data = cessoes, color = "red") %>% 
+  # addPolygons(data = certdisp, color = "white", fillColor = "blue", 
+  #             dashArray = "10 10") %>% 
+  # addPolygons(data = autobras, color = "white", fillColor = "grey", 
+  #             dashArray = "10 10") %>% 
+  # addPolygons(data = entregas, color = "white", fillColor = "white", 
+  #             dashArray = "10 10") %>% 
+  # Adiciona polígonos da União
+  addPolygons(data = polUniao, color = "yellow", group = "Terras de Marinha") %>% 
+  # Adiciona Linhas de Marinha
+  # addPolylines(data = lltmHomologada, color = "red") %>% 
+  # addPolylines(data = lpmHomologada, color = "blue") %>% 
+  # addPolylines(data = lltmDemarcada, color = "red", dashArray = "10 10") %>%
+  # addPolylines(data = lpmDemarcada, color = "blue", dashArray = "10 10") %>%
+  addPolylines(data = lltmPresumida, color = "red", dashArray = "10 10",
+               opacity = .2, weight = 3) %>%
+  addPolylines(data = lpmPresumida, color = "blue", dashArray = "10 10",
+               opacity = .2, weight = 3) %>%
+  # Zoom no imóvel em análise
+  fitBounds(lng1 = ext[1], lat1 = ext[3], lng2 = ext[2], lat2 = ext[4]) %>% 
+  # Adiciona Legendas
+  addLegend(labels = "Terras de Marinha", colors = "yellow", 
+            group = "Terras de Marinha", position = "topright") %>% 
+  addLegend(labels = "Em análise", colors = "blue", 
+            group = "Em análise", position = "topright") %>% 
+  # Adiciona Minimapa
+  addMiniMap(position = "topleft", 
+             tiles = providers$Esri.WorldGrayCanvas) %>% 
+  addMouseCoordinates() %>%
+  addLogo("SPU.jpg", src = "local", position = "bottomleft", 
+                  offset.x = 15, offset.y = 15, 
+                  width = 75, height = 75)
+name <- paste(st_geohash(spl_df, 10), ".png", sep = "")
+mapview::mapshot(m, file = name, remove_url = FALSE)
+knitr::include_graphics(name)
+```
+
+## Poligonal em análise -- ESRI Imagery
+
+```{r}
+centroide <- st_coordinates(st_centroid(spl_df))
+m <- spl_df %>% 
+  leaflet() %>% 
+  # Adiciona ortofotos do Estado de SC (SIG-SC) como base
+  # addWMSTiles(baseUrl = "http://sigsc.sc.gov.br/sigserver/SIGSC/wms", 
+  #             layers = list("OrtoRGB-Landsat-2012")) %>%
+  # Adiciona como camada de base Fotos de satélite da ESRI
+  addProviderTiles(providers$Esri.WorldImagery) %>%
+  # Adiciona o(s) polígono(s) em análise
+  addPolygons(stroke = TRUE, weight = 2, color = "blue", 
+              group = "Em análise") %>%
+  # Adiciona outras camadas existentes
+  # addPolygons(data = cessoes, color = "red") %>% 
+  # addPolygons(data = certdisp, color = "white", fillColor = "blue", 
+  #             dashArray = "10 10") %>% 
+  # addPolygons(data = autobras, color = "white", fillColor = "grey", 
+  #             dashArray = "10 10") %>% 
+  # addPolygons(data = entregas, color = "white", fillColor = "white", 
+  #             dashArray = "10 10") %>% 
+  # Adiciona polígonos da União
+  addPolygons(data = polUniao, color = "yellow", group = "Terras de Marinha") %>% 
+  # Adiciona Linhas de Marinha
+  # addPolylines(data = lltmHomologada, color = "red") %>% 
+  # addPolylines(data = lpmHomologada, color = "blue") %>% 
+  # addPolylines(data = lltmDemarcada, color = "red", dashArray = "10 10") %>%
+  # addPolylines(data = lpmDemarcada, color = "blue", dashArray = "10 10") %>%
+  addPolylines(data = lltmPresumida, color = "red", dashArray = "10 10",
+               opacity = .2, weight = 3) %>%
+  addPolylines(data = lpmPresumida, color = "blue", dashArray = "10 10",
+               opacity = .2, weight = 3) %>%
+  # Zoom no imóvel em análise
+  setView(lng = centroide[1], lat = centroide[2], zoom = 17) %>% 
+  # Adiciona Legendas
+  addLegend(labels = "Terras de Marinha", colors = "yellow", 
+            group = "Terras de Marinha", position = "topright") %>% 
+  addLegend(labels = "Em análise", colors = "blue", 
+            group = "Em análise", position = "topright") %>% 
+  # Adiciona Minimapa
+  addMiniMap(position = "topleft", 
+             tiles = providers$Esri.WorldGrayCanvas) %>% 
+  addMouseCoordinates() %>%
+  addLogo("SPU.jpg", src = "local", position = "bottomleft", 
+                  offset.x = 15, offset.y = 15, 
+                  width = 75, height = 75)
+name <- paste(st_geohash(spl_df, 10), "_2.png", sep = "")
+mapview::mapshot(m, file = name, remove_url = FALSE)
+knitr::include_graphics(name)
+```
+
+
+## Tabela de coordenadas
+
+```{r tabela-coordenadas}
+df <- st_coordinates(spl_df)[, c(1, 2)]
+df_SIRGAS <- st_coordinates(st_transform(spl_df, crs = 31982))[, c(1, 2)]
+vertices <- paste("VT", seq_len(dim(df_SIRGAS)[1] - 1), sep = "")
+row.names(df_SIRGAS) <- make.names(c(vertices, vertices[1]), unique = TRUE)
+# kable(df,
+#       format.args = list(nsmall = 2),
+#       col.names = c("E", "N"))
+#df_SIRGAS
+azimutes <- vector(mode = "numeric", length = dim(df)[1]-1)
+distances <- vector(mode = "numeric", length = dim(df)[1]-1) # Curso é o azimute de 0 a 360
+
+for (i in seq_len(dim(df)[1])) {
+  if (i != dim(df)[1]){
+    
+      azimutes[[i]] <- st_geod_azimuth(st_sfc(st_point(df[i, ]), 
+                                          st_point(df[i + 1, ]), crs = 4326))
+      
+      distances[[i]] <- st_distance(st_point(df_SIRGAS[i, ]),
+                               st_point(df_SIRGAS[i + 1, ]))
+  }
+}
+
+azimutes <- set_units(azimutes, rad)
+azimutes_deg <- set_units(azimutes, degrees)
+course <- (as.vector(azimutes_deg) + 360) %% 360
+conv_merid <- -1.06277192089
+planar_course <- course - conv_merid
+
+df_SIRGAS <- cbind(df_SIRGAS, 
+                   AzReal = c(course, NA),
+                   AzPlano = c(planar_course, NA),
+                   Dist = c(distances, NA))
+df_SIRGAS <- as.data.frame(df_SIRGAS)
+
+# Para grau, minutos e segundos
+#sp::dd2dms(as.vector(course[c(7, 8, 1, 2, 3, 4, 5, 6)]))
+
+kable(df_SIRGAS, digits = 2,
+      format.args = list(nsmall = 2, decimal.mark = ",", big.mark = "."),
+      col.names =  c("E", "N", "Real", "Plano", "(m)"),
+      longtable = TRUE, 
+      booktabs = TRUE) %>%
+  add_header_above(c("Vértice", "Coordenadas" = 2, "Azimutes" = 2, "Distância")) %>% 
+  kable_styling(font_size = 3)
+```
+
+## Tabela de atributos
+
+```{r atributos}
+kable(t(st_drop_geometry(spl_df)), col.names = NULL, booktabs = TRUE)%>% 
+  kable_styling(font_size = 6)
+```
+
+## Memorial
+
+```{r memorial}
+writeLines("Inicia-se este memorial pelo vertice ", 
+           con = 'memorial.md', sep = "")
+for (i in seq_len(nrow(df_SIRGAS) - 1)) {
+  cat("**", rownames(df_SIRGAS)[i], "** com coordenadas **N ", 
+  brf(df_SIRGAS[i, "Y"]), "** e **E ", brf(df_SIRGAS[i, "X"]), 
+  "**. Deste segue com azimute ", brf(df_SIRGAS[i, "AzPlano"]), " graus e 
+  distancia ",  brf(df_SIRGAS[i, "Dist"]), "m ate o vertice ", 
+  sep = "", file = 'memorial.md', append = TRUE)
+}
+cat("**", rownames(df_SIRGAS)[1], "** origem deste memorial.", sep = "",
+           file = 'memorial.md', append = TRUE)
+``` 
+
+```{r, results='asis', mysize=TRUE, size='\\scriptsize'}
+readLines('memorial.md')
+```
+
+## Exportar
+
+```{r, echo = TRUE, results='hide',  mysize=TRUE, size='\\scriptsize'}
+# Escrever no disco em formato geojson
+st_write(spl_df, "04972.009718.2013-58.geojson", delete_dsn = TRUE)
+```
+
+
